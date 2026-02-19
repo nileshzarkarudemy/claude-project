@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>METAR Weather Reader</title>
+    <style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(160deg, #0d1b2a 0%, #1b2838 50%, #0f2042 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            color: #e8eaf0;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 720px;
+        }
+
+        /* ── Header ── */
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header-icon {
+            font-size: 52px;
+            display: block;
+            margin-bottom: 14px;
+            filter: drop-shadow(0 4px 12px rgba(79, 172, 254, 0.4));
+        }
+
+        .header h1 {
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            color: #ffffff;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 15px;
+            color: rgba(255,255,255,0.5);
+        }
+
+        /* ── Search Card ── */
+        .card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 20px;
+            padding: 32px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(8px);
+        }
+
+        .search-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .search-row input {
+            flex: 1;
+            padding: 15px 20px;
+            background: rgba(255,255,255,0.06);
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            color: #ffffff;
+            font-size: 20px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            outline: none;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .search-row input::placeholder {
+            color: rgba(255,255,255,0.25);
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+
+        .search-row input:focus {
+            border-color: #4facfe;
+            background: rgba(79,172,254,0.06);
+        }
+
+        .btn-search {
+            padding: 15px 28px;
+            background: linear-gradient(135deg, #4facfe 0%, #00d4ff 100%);
+            border: none;
+            border-radius: 12px;
+            color: #0d1b2a;
+            font-size: 15px;
+            font-weight: 800;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: opacity 0.2s, transform 0.1s, box-shadow 0.2s;
+            box-shadow: 0 4px 20px rgba(79,172,254,0.3);
+        }
+
+        .btn-search:hover {
+            opacity: 0.9;
+            box-shadow: 0 6px 24px rgba(79,172,254,0.45);
+        }
+
+        .btn-search:active {
+            transform: scale(0.97);
+        }
+
+        .btn-search:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        /* ── Quick picks ── */
+        .quick-label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.3);
+            margin-bottom: 10px;
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .chip {
+            padding: 7px 14px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 20px;
+            font-size: 13px;
+            color: rgba(255,255,255,0.65);
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+            user-select: none;
+        }
+
+        .chip:hover {
+            background: rgba(79,172,254,0.15);
+            border-color: rgba(79,172,254,0.4);
+            color: #4facfe;
+        }
+
+        /* ── Loading ── */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 50px 30px;
+        }
+
+        .spinner {
+            width: 44px;
+            height: 44px;
+            border: 3px solid rgba(79,172,254,0.15);
+            border-top-color: #4facfe;
+            border-radius: 50%;
+            animation: spin 0.75s linear infinite;
+            margin: 0 auto 18px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .loading p {
+            color: rgba(255,255,255,0.5);
+            font-size: 14px;
+        }
+
+        /* ── Error ── */
+        .error-box {
+            display: none;
+            background: rgba(255,80,80,0.08);
+            border: 1px solid rgba(255,100,100,0.25);
+            border-radius: 14px;
+            padding: 18px 22px;
+            color: #ff9090;
+            font-size: 15px;
+        }
+
+        /* ── Result ── */
+        .result {
+            display: none;
+        }
+
+        .airport-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #4facfe 0%, #00d4ff 100%);
+            color: #0d1b2a;
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            padding: 5px 14px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+        }
+
+        .section-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+            color: #4facfe;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: rgba(79,172,254,0.2);
+        }
+
+        .friendly-report {
+            font-size: 16px;
+            line-height: 1.85;
+            color: #dde3ef;
+            white-space: pre-wrap;
+        }
+
+        .raw-metar {
+            font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+            font-size: 13px;
+            color: rgba(255,255,255,0.45);
+            word-break: break-all;
+            line-height: 1.7;
+            background: rgba(0,0,0,0.2);
+            border-radius: 10px;
+            padding: 16px;
+        }
+
+        .divider {
+            border: none;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            margin: 24px 0;
+        }
+
+        /* ── Footer ── */
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 12px;
+            color: rgba(255,255,255,0.2);
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <!-- Header -->
+    <div class="header">
+        <span class="header-icon">✈️</span>
+        <h1>METAR Weather Reader</h1>
+        <p>Type an airport's ICAO code to get a plain-English weather report</p>
+    </div>
+
+    <!-- Search card -->
+    <div class="card">
+        <div class="search-row">
+            <input
+                id="airportInput"
+                type="text"
+                placeholder="Airport code — e.g. KJFK"
+                maxlength="4"
+                autocomplete="off"
+                spellcheck="false"
+            />
+            <button class="btn-search" id="searchBtn" onclick="fetchWeather()">
+                Get Weather
+            </button>
+        </div>
+
+        <div class="quick-label">Popular airports</div>
+        <div class="chips">
+            <span class="chip" onclick="pick('KJFK')">KJFK &mdash; New York JFK</span>
+            <span class="chip" onclick="pick('KLAX')">KLAX &mdash; Los Angeles</span>
+            <span class="chip" onclick="pick('KORD')">KORD &mdash; Chicago O'Hare</span>
+            <span class="chip" onclick="pick('EGLL')">EGLL &mdash; London Heathrow</span>
+            <span class="chip" onclick="pick('YSSY')">YSSY &mdash; Sydney</span>
+            <span class="chip" onclick="pick('RJTT')">RJTT &mdash; Tokyo Haneda</span>
+            <span class="chip" onclick="pick('EDDF')">EDDF &mdash; Frankfurt</span>
+            <span class="chip" onclick="pick('CYYZ')">CYYZ &mdash; Toronto Pearson</span>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div class="card loading" id="loading">
+        <div class="spinner"></div>
+        <p>Fetching live METAR &amp; decoding with AI&hellip;</p>
+    </div>
+
+    <!-- Error -->
+    <div class="error-box" id="errorBox"></div>
+
+    <!-- Result -->
+    <div class="result card" id="result">
+        <div class="airport-pill" id="airportPill">✈ ----</div>
+
+        <div class="section-label">Weather Summary</div>
+        <div class="friendly-report" id="friendlyReport"></div>
+
+        <hr class="divider" />
+
+        <div class="section-label">Raw METAR</div>
+        <div class="raw-metar" id="rawMetar"></div>
+    </div>
+
+    <div class="footer">Data from <strong>aviationweather.gov</strong> &bull; Decoded by Claude AI</div>
+
+</div>
+
+<script>
+    const input = document.getElementById('airportInput');
+    const btn   = document.getElementById('searchBtn');
+
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') fetchWeather();
+    });
+
+    function pick(code) {
+        input.value = code;
+        fetchWeather();
+    }
+
+    function setLoading(on) {
+        document.getElementById('loading').style.display  = on ? 'block' : 'none';
+        document.getElementById('result').style.display   = 'none';
+        document.getElementById('errorBox').style.display = 'none';
+        btn.disabled = on;
+    }
+
+    function showError(msg) {
+        const box = document.getElementById('errorBox');
+        box.textContent = '⚠ ' + msg;
+        box.style.display = 'block';
+        document.getElementById('loading').style.display = 'none';
+        btn.disabled = false;
+    }
+
+    async function fetchWeather() {
+        const code = input.value.trim().toUpperCase();
+        if (!code) { showError('Please enter an airport code.'); return; }
+
+        setLoading(true);
+
+        try {
+            const res  = await fetch('/api/weather?airport=' + encodeURIComponent(code));
+            const data = await res.json();
+
+            if (!res.ok || data.error) {
+                showError(data.error || 'Something went wrong. Please try again.');
+                return;
+            }
+
+            document.getElementById('airportPill').textContent  = '✈ ' + data.airportCode;
+            document.getElementById('friendlyReport').textContent = data.friendlyReport;
+            document.getElementById('rawMetar').textContent      = data.rawMetar || '—';
+
+            document.getElementById('result').style.display = 'block';
+        } catch (err) {
+            showError('Network error — please check your connection and try again.');
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+            btn.disabled = false;
+        }
+    }
+</script>
+</body>
+</html>
