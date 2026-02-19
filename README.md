@@ -20,16 +20,26 @@ This app decodes that into something like:
 Browser / API client
       │
       ▼
-MetarResource  (JAX-RS — GET /api/weather?airport=KJFK)
+MetarResource    (JAX-RS — GET /api/weather?airport=KJFK)
       │
       ▼
 MetarService
   ├── AviationWeatherClient ──► aviationweather.gov  (fetch raw METAR)
-  └── OpenAI GPT-4o          ──► plain-English summary
+  └── AiDecoder             ──► OpenAI GPT-4o        (plain-English summary)
       │
       ▼
 WeatherReportDto  (JSON response)
 ```
+
+### Key Components
+
+| Class | Role |
+|---|---|
+| `MetarResource` | JAX-RS endpoint — validates input, delegates to `MetarService`, maps errors to HTTP status codes |
+| `MetarService` | Orchestrates the two-step flow: fetch METAR → decode with AI |
+| `AviationWeatherClient` | MicroProfile REST client for `aviationweather.gov` |
+| `AiDecoder` | CDI bean that owns the OpenAI client and prompt, returns a plain-English summary |
+| `WeatherReportDto` | JSON response envelope (`airportCode`, `rawMetar`, `friendlyReport`, `error`) |
 
 ## Prerequisites
 
@@ -42,8 +52,8 @@ WeatherReportDto  (JSON response)
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/your-username/metar-reader.git
-   cd metar-reader
+   git clone https://github.com/nileshzarkarudemy/claude-project.git
+   cd claude-project
    ```
 
 2. **Set your OpenAI API key**
@@ -117,7 +127,7 @@ curl "http://localhost:8080/api/weather?airport=KJFK"
 
 ### ICAO Code Format
 
-ICAO codes are 4-letter identifiers used globally:
+ICAO codes are 3–4 character identifiers used globally:
 
 | Code | Airport |
 |------|---------|
@@ -130,13 +140,69 @@ ICAO codes are 4-letter identifiers used globally:
 
 ## Configuration
 
-All configuration lives in `src/main/resources/application.properties`:
-
 | Property | Default | Description |
 |----------|---------|-------------|
-| `openai.api.key` | `${OPENAI_API_KEY}` | OpenAI API key (from env var) |
+| `openai.api.key` | `${OPENAI_API_KEY}` | OpenAI API key (read from env var) |
+| `openai.base.url` | `https://api.openai.com` | OpenAI base URL — override in tests to point to a mock server |
 | `quarkus.rest-client.aviation-weather.url` | `https://aviationweather.gov` | Weather data source |
 | `quarkus.http.port` | `8080` | HTTP server port |
+
+## Testing
+
+Run the full test suite:
+
+```bash
+./mvnw test
+```
+
+### Test Strategy
+
+Both external dependencies (`AviationWeatherClient` and `AiDecoder`) are CDI beans, which means they can be replaced with Mockito mocks using `@InjectMock` — no live network calls are made during tests.
+
+```
+MetarResourceTest                    MetarServiceTest
+─────────────────────────────        ──────────────────────────────────
+@QuarkusTest (full HTTP server)      @QuarkusTest (CDI container only)
+  │                                    │
+  ├── @InjectMock MetarService          ├── @InjectMock AviationWeatherClient
+  │   (entire service mocked)          │   (returns fixture METARs)
+  │                                    │
+  └── RestAssured → /api/weather        ├── @InjectMock AiDecoder
+      asserts status codes,            │   (returns fixture decoded text)
+      JSON shape, validation           │
+                                       └── Asserts DTO fields and
+                                           that rawMetar reaches AiDecoder
+```
+
+### Test Classes
+
+#### `MetarResourceTest` (8 tests)
+
+Tests the HTTP layer in isolation — `MetarService` is fully mocked.
+
+| Test | What it verifies |
+|---|---|
+| `shouldReturn200WithFullPayloadForValidAirportCode` | Happy path: correct status, all JSON fields populated |
+| `shouldNormalizeLowercaseCodeToUppercaseBeforeCallingService` | `kjfk` → service called with `KJFK` |
+| `shouldAcceptThreeCharacterIcaoCode` | 3-char codes (e.g. `SYD`) are valid |
+| `shouldReturn400WhenAirportParamIsAbsent` | Missing query param → 400 |
+| `shouldReturn400WhenAirportParamIsBlank` | Whitespace-only param → 400 |
+| `shouldReturn400WhenAirportCodeIsTooLong` | 5+ character codes → 400 |
+| `shouldReturn400WhenAirportCodeContainsSpecialCharacters` | Non-alphanumeric input → 400 |
+| `shouldReturn404WhenServiceReturnsAnErrorDto` | Service error DTO → 404 with error message |
+
+#### `MetarServiceTest` (6 tests)
+
+Tests the orchestration logic — both `AviationWeatherClient` and `AiDecoder` are mocked.
+
+| Test | What it verifies |
+|---|---|
+| `shouldReturnDecodedReportForKjfkMetar` | Happy path: DTO contains airport code, raw METAR, and decoded report |
+| `shouldPassRawMetarToAiDecoder` | The exact raw METAR string is forwarded to `AiDecoder.decode()` unchanged |
+| `shouldNormalizeInputAirportCodeToUppercase` | `egll` → weather client called with `EGLL` |
+| `shouldReturnErrorDtoWhenWeatherClientThrowsException` | Network failure → error DTO mentioning weather service |
+| `shouldReturnErrorDtoWhenMetarResponseIsEmpty` | Empty METAR response → error DTO mentioning missing data |
+| `shouldReturnErrorDtoWhenAiDecoderThrows` | AI failure → error DTO containing the raw METAR as fallback |
 
 ## Tech Stack
 
@@ -147,6 +213,7 @@ All configuration lives in `src/main/resources/application.properties`:
 | AI Model | OpenAI GPT-4o via [openai-java](https://github.com/openai/openai-java) 4.21.0 |
 | Weather Data | [Aviation Weather Center API](https://aviationweather.gov) |
 | REST | JAX-RS (Quarkus REST) + MicroProfile REST Client |
+| Testing | JUnit 5, Mockito (`quarkus-junit5-mockito`), RestAssured, WireMock 3.9.1 |
 
 ## License
 
