@@ -12,20 +12,37 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
 
+/**
+ * Application-scoped service that orchestrates METAR retrieval and AI decoding.
+ * <p>
+ * On each request it:
+ * <ol>
+ *   <li>Fetches the raw METAR string from the Aviation Weather Center API via
+ *       {@link AviationWeatherClient}.</li>
+ *   <li>Sends the raw METAR to the OpenAI GPT-4o model with a structured prompt
+ *       asking for a plain-English weather summary.</li>
+ *   <li>Returns the result wrapped in a {@link WeatherReportDto}.</li>
+ * </ol>
+ * The OpenAI API key is read from the {@code OPENAI_API_KEY} environment variable.
+ */
 @ApplicationScoped
 public class MetarService {
 
     private static final Logger LOG = Logger.getLogger(MetarService.class);
 
+    /** REST client for fetching raw METAR data from aviationweather.gov. */
     @Inject
     @RestClient
     AviationWeatherClient weatherClient;
 
+    /** OpenAI API key, injected from the {@code OPENAI_API_KEY} environment variable. */
     @ConfigProperty(name = "openai.api.key")
     String apiKey;
 
+    /** Lazily initialised OpenAI client, created once at startup. */
     private OpenAIClient openAiClient;
 
+    /** Builds the OpenAI client after dependency injection is complete. */
     @PostConstruct
     void init() {
         openAiClient = OpenAIOkHttpClient.builder()
@@ -33,6 +50,13 @@ public class MetarService {
                 .build();
     }
 
+    /**
+     * Fetches and decodes the METAR report for the given airport code.
+     *
+     * @param airportCode a valid ICAO airport identifier (e.g. {@code KJFK})
+     * @return a {@link WeatherReportDto} containing the raw METAR and decoded summary,
+     *         or an error DTO if the weather service or AI decoding step fails
+     */
     public WeatherReportDto getWeatherReport(String airportCode) {
         String code = airportCode.trim().toUpperCase();
 
@@ -67,6 +91,13 @@ public class MetarService {
         return new WeatherReportDto(code, rawMetar, friendlyReport);
     }
 
+    /**
+     * Calls the OpenAI Chat Completions API to translate a raw METAR into
+     * a friendly, plain-English weather summary.
+     *
+     * @param rawMetar the raw METAR string to decode
+     * @return a human-readable weather description
+     */
     private String decodeMeta(String rawMetar) {
         String prompt = """
                 You are a friendly aviation weather decoder. I have a raw METAR report from an airport,
